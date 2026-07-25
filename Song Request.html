@@ -112,6 +112,46 @@
   .tbtn.close{cursor:pointer;}
   .tbtn.close:hover{background:#F0C0C0;}
 
+  .flip-wrap{margin:0 0 20px;}
+  .flip-label-top{font-size:10px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:1px;font-weight:bold;text-align:center;margin:0 0 8px;}
+  .flip-row{display:flex;justify-content:center;gap:6px;}
+  .flip-unit{display:flex;flex-direction:column;align-items:center;}
+  .flip-card{
+    background:linear-gradient(to bottom, #062617 0%, #031A0E 48%, #020F07 52%, #041F11 100%);
+    color:var(--neon);
+    font-family:"Courier New",Courier,monospace;
+    font-size:22px;
+    font-weight:bold;
+    letter-spacing:1px;
+    padding:8px 4px;
+    width:46px;
+    text-align:center;
+    border:2px solid var(--win-shadow);
+    border-radius:5px;
+    box-shadow:inset 1px 1px 0 rgba(0,0,0,0.5), inset -1px -1px 0 rgba(0,255,140,0.12);
+    text-shadow:0 0 6px rgba(0,255,140,0.55);
+    position:relative;
+    overflow:hidden;
+    transform-style:preserve-3d;
+  }
+  .flip-card::after{
+    content:"";
+    position:absolute;
+    left:0;right:0;top:50%;
+    height:2px;
+    margin-top:-1px;
+    background:rgba(0,0,0,0.65);
+    box-shadow:0 1px 0 rgba(0,255,140,0.08);
+  }
+  @keyframes flip-pulse{
+    0%{transform:rotateX(0deg);filter:brightness(1);}
+    50%{transform:rotateX(85deg);filter:brightness(2.6);}
+    100%{transform:rotateX(0deg);filter:brightness(1);}
+  }
+  .flip-card.flip{animation:flip-pulse 0.32s ease;}
+  .flip-unit-label{font-size:9px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:0.5px;margin-top:4px;}
+  .flip-sep{align-self:center;color:var(--ink-dim);font-size:18px;font-weight:bold;padding-bottom:14px;}
+
   /* --- signature: CRT queue readout --- */
   .lcd{
     background:var(--crt-bg);
@@ -289,6 +329,18 @@
   </div>
 
   <div class="panel active" id="panel-request">
+    <div class="flip-wrap">
+      <div class="flip-label-top" id="flip-label-top">Estimated wait</div>
+      <div class="flip-row">
+        <div class="flip-unit"><div class="flip-card" id="fc-d">00</div><div class="flip-unit-label">days</div></div>
+        <div class="flip-sep">:</div>
+        <div class="flip-unit"><div class="flip-card" id="fc-h">00</div><div class="flip-unit-label">hrs</div></div>
+        <div class="flip-sep">:</div>
+        <div class="flip-unit"><div class="flip-card" id="fc-m">00</div><div class="flip-unit-label">min</div></div>
+        <div class="flip-sep">:</div>
+        <div class="flip-unit"><div class="flip-card" id="fc-s">00</div><div class="flip-unit-label">sec</div></div>
+      </div>
+    </div>
     <div class="field">
       <label for="f-song">Song title</label>
       <input type="text" id="f-song" placeholder="e.g. Cherry Wine" maxlength="120">
@@ -327,6 +379,10 @@
 <script>
 // PASTE YOUR FIREBASE DATABASE URL BELOW, between the quotes.
 // Example: 'https://song-requests-xxxxx-default-rtdb.firebaseio.com'
+// HOW MANY MINUTES YOU TYPICALLY TAKE TO LOAD ONE SONG ONTO THE DAP.
+// The countdown estimates ETA as (pending songs) x (this number).
+const MINUTES_PER_SONG = 8;
+
 const FIREBASE_URL = 'https://song-requests-e754a-default-rtdb.firebaseio.com';
 
 const DATA_ENDPOINT = FIREBASE_URL + '/requests.json';
@@ -371,6 +427,8 @@ async function saveRequests(){
 function render(){
   const pending = requests.filter(r => !r.added).sort((a,b) => b.ts - a.ts);
   const added = requests.filter(r => r.added).sort((a,b) => (b.addedTs||0) - (a.addedTs||0));
+
+  updateSyncEstimate(pending.length);
 
   document.getElementById('lcd-count').innerHTML = String(pending.length).padStart(2,'0') + ' <span class="lcd-cursor"></span>';
   document.getElementById('lcd-sub').textContent = pending.length === 1 ? '1 track waiting' : pending.length + ' tracks waiting';
@@ -441,6 +499,24 @@ async function markAdded(id){
   await saveRequests();
 }
 
+function startLiveUpdates(){
+  if(!FIREBASE_URL || typeof EventSource === 'undefined') return;
+  try{
+    const stream = new EventSource(DATA_ENDPOINT);
+    stream.addEventListener('put', (e) => {
+      try{
+        const parsed = JSON.parse(e.data);
+        if(parsed.path === '/'){
+          requests = parsed.data ? Object.values(parsed.data) : [];
+          render();
+        }
+      }catch(err){}
+    });
+  }catch(err){
+    console.error('Live updates unavailable', err);
+  }
+}
+
 async function removeRequest(id){
   requests = requests.filter(x => x.id !== id);
   render();
@@ -490,6 +566,51 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+let syncTargetMs = Date.now();
+let lastPendingCount = -1;
+
+function updateSyncEstimate(pendingCount){
+  if(pendingCount === lastPendingCount) return;
+  lastPendingCount = pendingCount;
+  syncTargetMs = Date.now() + pendingCount * MINUTES_PER_SONG * 60000;
+  const label = document.getElementById('flip-label-top');
+  if(label){
+    label.textContent = pendingCount === 0 ? 'Queue clear' : 'Estimated wait';
+  }
+}
+
+function setFlipDigit(id, value){
+  const el = document.getElementById(id);
+  const padded = String(value).padStart(2, '0');
+  if(el.textContent !== padded){
+    el.textContent = padded;
+    el.classList.remove('flip');
+    void el.offsetWidth;
+    el.classList.add('flip');
+  }
+}
+
+function tickCountdown(){
+  const diffRaw = syncTargetMs - Date.now();
+  let diff = Math.max(0, diffRaw);
+
+  const d = Math.floor(diff / 86400000);
+  diff -= d * 86400000;
+  const h = Math.floor(diff / 3600000);
+  diff -= h * 3600000;
+  const m = Math.floor(diff / 60000);
+  diff -= m * 60000;
+  const s = Math.floor(diff / 1000);
+
+  setFlipDigit('fc-d', d);
+  setFlipDigit('fc-h', h);
+  setFlipDigit('fc-m', m);
+  setFlipDigit('fc-s', s);
+}
+
+tickCountdown();
+setInterval(tickCountdown, 1000);
+
 loadRequests();
 
 if(window.location.hash === '#manage'){
@@ -498,6 +619,7 @@ if(window.location.hash === '#manage'){
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelector('.tab-btn[data-tab="manage"]').classList.add('active');
   document.getElementById('panel-manage').classList.add('active');
+  startLiveUpdates();
 }
 
 const crtwin = document.getElementById('crtwin');
