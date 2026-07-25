@@ -76,6 +76,42 @@
   }
   .win-body{padding:16px 16px 18px;}
 
+  #crtwin{transform-origin:center;}
+  @keyframes crt-off{
+    0%{transform:scaleY(1) scaleX(1);filter:brightness(1);opacity:1;}
+    55%{transform:scaleY(0.025) scaleX(1);filter:brightness(4);opacity:1;}
+    100%{transform:scaleY(0.001) scaleX(0.001);filter:brightness(0.3);opacity:0;}
+  }
+  @keyframes crt-on{
+    0%{transform:scaleY(0.001) scaleX(0.001);filter:brightness(4);opacity:0;}
+    45%{transform:scaleY(0.025) scaleX(1);filter:brightness(4);opacity:1;}
+    100%{transform:scaleY(1) scaleX(1);filter:brightness(1);opacity:1;}
+  }
+  #crtwin.powering-off{animation:crt-off 0.38s ease-in forwards;}
+  #crtwin.powering-on{animation:crt-on 0.38s ease-out forwards;}
+
+  #power-dot{
+    display:none;
+    width:100%;
+    padding:60px 0;
+    text-align:center;
+    cursor:pointer;
+  }
+  #power-dot .dot{
+    display:inline-block;
+    width:8px;height:8px;
+    border-radius:50%;
+    background:var(--neon);
+    box-shadow:0 0 8px rgba(0,255,140,0.7);
+    animation:dot-pulse 1.6s ease-in-out infinite;
+    margin-bottom:10px;
+  }
+  #power-dot .hint{display:block;font-size:11px;color:var(--neon-dim);letter-spacing:0.5px;text-transform:uppercase;}
+  @keyframes dot-pulse{0%,100%{opacity:0.5;}50%{opacity:1;}}
+
+  .tbtn.close{cursor:pointer;}
+  .tbtn.close:hover{background:#F0C0C0;}
+
   /* --- signature: CRT queue readout --- */
   .lcd{
     background:var(--crt-bg);
@@ -227,13 +263,13 @@
 </head>
 <body>
 <div class="app">
-<div class="win">
+<div class="win" id="crtwin">
   <div class="titlebar">
     <span>REQUESTS.EXE</span>
     <div class="titlebar-dots">
       <span class="tbtn">_</span>
       <span class="tbtn">&#9633;</span>
-      <span class="tbtn">X</span>
+      <span class="tbtn close" id="btn-close">X</span>
     </div>
   </div>
   <div class="win-body">
@@ -281,6 +317,10 @@
   </div>
 
   </div>
+</div>
+<div id="power-dot">
+  <span class="dot"></span>
+  <span class="hint">click to power on</span>
 </div>
 </div>
 
@@ -459,6 +499,31 @@ if(window.location.hash === '#manage'){
   document.querySelector('.tab-btn[data-tab="manage"]').classList.add('active');
   document.getElementById('panel-manage').classList.add('active');
 }
+
+const crtwin = document.getElementById('crtwin');
+const powerDot = document.getElementById('power-dot');
+
+document.getElementById('btn-close').addEventListener('click', () => {
+  crtwin.classList.remove('powering-on');
+  crtwin.classList.add('powering-off');
+});
+
+crtwin.addEventListener('animationend', (e) => {
+  if(e.animationName === 'crt-off'){
+    crtwin.style.display = 'none';
+    powerDot.style.display = 'block';
+  } else if(e.animationName === 'crt-on'){
+    crtwin.classList.remove('powering-on');
+  }
+});
+
+powerDot.addEventListener('click', () => {
+  powerDot.style.display = 'none';
+  crtwin.style.display = 'block';
+  crtwin.classList.remove('powering-off');
+  void crtwin.offsetWidth;
+  crtwin.classList.add('powering-on');
+});
 </script>
 </body>
 </html>
